@@ -140,7 +140,7 @@ class HexagonLightDevice:
         self._write_response = None
         self._status_event.clear()
 
-    def _handle_notify(self, sender: int, data: bytearray) -> None:
+    def _handle_notify(self, sender: object, data: bytearray) -> None:
         raw = bytes(data)
         self._last_notify = raw
         now = monotonic()
@@ -151,7 +151,18 @@ class HexagonLightDevice:
             if last is None or (now - last) > 0.5:
                 self._last_notify_log_ts = now
                 _ROOT_LOGGER.debug(
-                    f"{self.address}: HEXAGON_NOTIFY handle=0x{sender:04x} data={raw.hex()}"
+                    "%s: HEXAGON_NOTIFY sender=%s data=%s",
+                    self.address,
+                    (
+                        f"0x{sender:04x}"
+                        if isinstance(sender, int)
+                        else (
+                            f"0x{sender.handle:04x}"
+                            if hasattr(sender, "handle") and isinstance(getattr(sender, "handle"), int)
+                            else str(sender)
+                        )
+                    ),
+                    raw.hex(),
                 )
 
         if self._parse_state(raw):
@@ -237,6 +248,11 @@ class HexagonLightDevice:
             return True
 
         if raw[0] != 0x56:
+            return False
+
+        # Similar to 0x55, devices may send non-status 0x56 frames (cmd != 0x00)
+        # as responses to other commands; ignore those to avoid state glitches.
+        if raw[1] != 0x00:
             return False
 
         is_on = raw[4] != 0
