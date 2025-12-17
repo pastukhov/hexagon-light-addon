@@ -81,14 +81,16 @@ class HexagonLightEntity(CoordinatorEntity[DataUpdateCoordinator[None]], LightEn
         if effect := kwargs.get(ATTR_EFFECT):
             await self._device.async_turn_on()
             await self._device.async_set_scene_by_name(effect)
-            await self._device.async_set_brightness_percent(brightness_pct)
+            if ATTR_BRIGHTNESS in kwargs:
+                await self._device.async_set_brightness_percent(brightness_pct)
             return
 
         if ATTR_RGB_COLOR in kwargs:
             rgb = kwargs[ATTR_RGB_COLOR]
             await self._device.async_turn_on()
             await self._device.async_set_rgb(rgb[0], rgb[1], rgb[2])
-            await self._device.async_set_brightness_percent(brightness_pct)
+            if ATTR_BRIGHTNESS in kwargs:
+                await self._device.async_set_brightness_percent(brightness_pct)
             return
 
         if ATTR_BRIGHTNESS in kwargs:

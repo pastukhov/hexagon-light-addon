@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import colorsys
 from collections.abc import Callable
 from contextlib import suppress
 import logging
@@ -81,6 +82,17 @@ def _u16_be(value: int) -> bytes:
     value = value & 0xFFFF
     return bytes([(value >> 8) & 0xFF, value & 0xFF])
 
+
+def _rgb_to_hue_sat_payload(r: int, g: int, b: int) -> bytes:
+    r = _clamp_int(r, 0, 255)
+    g = _clamp_int(g, 0, 255)
+    b = _clamp_int(b, 0, 255)
+    h, s, _v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
+    hue_deg = int(h * 360.0) % 360
+    sat_1000 = _clamp_int(int(s * 1000.0), 0, 1000)
+    return _u16_be(hue_deg) + _u16_be(sat_1000)
+
+
 class HexagonLightDevice:
     """Async controller for Hexagon Light."""
 
@@ -93,7 +105,7 @@ class HexagonLightDevice:
         self._write_response: bool | None = None
 
         self._callbacks: set[Callable[[], None]] = set()
-        self._notify_event = asyncio.Event()
+        self._status_event = asyncio.Event()
         self._last_notify: bytes | None = None
 
         self.is_on: bool | None = None
@@ -122,14 +134,14 @@ class HexagonLightDevice:
     def _on_disconnect(self, _client: BleakClient) -> None:
         self._client = None
         self._write_response = None
-        self._notify_event.clear()
+        self._status_event.clear()
 
     def _handle_notify(self, _sender: int, data: bytearray) -> None:
         raw = bytes(data)
         self._last_notify = raw
-        self._notify_event.set()
-        self._parse_state(raw)
-        self._call_callbacks()
+        if self._parse_state(raw):
+            self._status_event.set()
+            self._call_callbacks()
 
     async def async_stop(self) -> None:
         """Disconnect the device."""
@@ -181,50 +193,53 @@ class HexagonLightDevice:
             else:
                 raise
 
-    def _parse_state(self, raw: bytes | None) -> None:
+    def _parse_state(self, raw: bytes | None) -> bool:
         if not raw or len(raw) < 6:
-            return
+            return False
         if (sum(raw) & 0xFF) != 0xFF:
-            return
+            return False
 
         brightness_percent: int | None = None
 
         if raw[0] == 0x55:
             length = raw[3]
             if length != len(raw):
-                return
-            is_on_byte = raw[4]
-            is_on: bool | None = bool(is_on_byte) if is_on_byte in (0, 1) else None
+                return False
+
+            # 0x55 frames may also be responses to other commands (e.g. scene index or hue),
+            # which would corrupt HA state if parsed as power/brightness.
+            if raw[1] != 0x00:
+                return False
+
+            is_on = raw[4] != 0
             if len(raw) >= 7:
                 b = int(raw[5]) - 5
                 if 0 <= b <= 100:
                     brightness_percent = b
-            if is_on is not None:
-                self.is_on = is_on
+            self.is_on = is_on
             self.brightness_percent = brightness_percent
-            return
+            return True
 
         if raw[0] != 0x56:
-            return
+            return False
 
-        is_on_byte = raw[4]
-        is_on: bool | None = bool(is_on_byte) if is_on_byte in (0, 1) else None
+        is_on = raw[4] != 0
         if len(raw) >= 8:
             value = (raw[5] << 8) | raw[6]
             b = (value // 10) - 5
             if 0 <= b <= 100:
                 brightness_percent = b
-        if is_on is not None:
-            self.is_on = is_on
+        self.is_on = is_on
         self.brightness_percent = brightness_percent
+        return True
 
     async def async_update(self) -> None:
         """Request a sync/status frame and update best-effort state."""
-        self._notify_event.clear()
+        self._status_event.clear()
         await self._ensure_connected()
         await self._write_frame(_build_command(0x00, None))
         try:
-            await asyncio.wait_for(self._notify_event.wait(), timeout=float(STATUS_TIMEOUT))
+            await asyncio.wait_for(self._status_event.wait(), timeout=float(STATUS_TIMEOUT))
         except TimeoutError:
             _LOGGER.debug("%s: no status notification received", self.address)
 
@@ -249,7 +264,7 @@ class HexagonLightDevice:
         r_i = _clamp_int(int(r), 0, 255)
         g_i = _clamp_int(int(g), 0, 255)
         b_i = _clamp_int(int(b), 0, 255)
-        await self._write_frame(_build_command(0x03, bytes([r_i, g_i, b_i])))
+        await self._write_frame(_build_command(0x03, _rgb_to_hue_sat_payload(r_i, g_i, b_i)))
         self.rgb = (r_i, g_i, b_i)
         self.effect = None
         self._call_callbacks()
