@@ -7,6 +7,7 @@ import colorsys
 from collections.abc import Callable
 from contextlib import suppress
 import logging
+from time import monotonic
 
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
@@ -107,6 +108,7 @@ class HexagonLightDevice:
         self._callbacks: set[Callable[[], None]] = set()
         self._status_event = asyncio.Event()
         self._last_notify: bytes | None = None
+        self._last_on_command_ts: float | None = None
 
         self.is_on: bool | None = None
         self.brightness_percent: int | None = None
@@ -216,8 +218,9 @@ class HexagonLightDevice:
                 b = int(raw[5]) - 5
                 if 0 <= b <= 100:
                     brightness_percent = b
-            self.is_on = is_on
-            self.brightness_percent = brightness_percent
+            if brightness_percent is not None:
+                self.brightness_percent = brightness_percent
+            self._apply_is_on_from_status(is_on)
             return True
 
         if raw[0] != 0x56:
@@ -229,9 +232,19 @@ class HexagonLightDevice:
             b = (value // 10) - 5
             if 0 <= b <= 100:
                 brightness_percent = b
-        self.is_on = is_on
-        self.brightness_percent = brightness_percent
+        if brightness_percent is not None:
+            self.brightness_percent = brightness_percent
+        self._apply_is_on_from_status(is_on)
         return True
+
+    def _apply_is_on_from_status(self, is_on: bool) -> None:
+        if (
+            is_on is False
+            and self._last_on_command_ts is not None
+            and monotonic() - self._last_on_command_ts < 30
+        ):
+            return
+        self.is_on = is_on
 
     async def async_update(self) -> None:
         """Request a sync/status frame and update best-effort state."""
@@ -246,11 +259,13 @@ class HexagonLightDevice:
     async def async_turn_on(self) -> None:
         await self._write_frame(_build_command(0x01, bytes([0x01])))
         self.is_on = True
+        self._last_on_command_ts = monotonic()
         self._call_callbacks()
 
     async def async_turn_off(self) -> None:
         await self._write_frame(_build_command(0x01, bytes([0x00])))
         self.is_on = False
+        self._last_on_command_ts = None
         self._call_callbacks()
 
     async def async_set_brightness_percent(self, percent: int) -> None:
@@ -258,6 +273,8 @@ class HexagonLightDevice:
         value = (percent + 5) * 10
         await self._write_frame(_build_command(0x05, _u16_be(value)))
         self.brightness_percent = percent
+        if percent > 0:
+            self._last_on_command_ts = monotonic()
         self._call_callbacks()
 
     async def async_set_rgb(self, r: int, g: int, b: int) -> None:
@@ -267,6 +284,7 @@ class HexagonLightDevice:
         await self._write_frame(_build_command(0x03, _rgb_to_hue_sat_payload(r_i, g_i, b_i)))
         self.rgb = (r_i, g_i, b_i)
         self.effect = None
+        self._last_on_command_ts = monotonic()
         self._call_callbacks()
 
     async def async_set_scene(self, scene: int, *, speed: int | None = None) -> None:
@@ -276,6 +294,7 @@ class HexagonLightDevice:
             speed_b = _clamp_int(int(speed), 0, 255) & 0xFF
             await self._write_frame(_build_command(0x0F, bytes([speed_b])))
         self.rgb = None
+        self._last_on_command_ts = monotonic()
         self._call_callbacks()
 
     async def async_set_scene_by_name(self, name: str, *, speed: int | None = None) -> None:
