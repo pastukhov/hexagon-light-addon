@@ -151,8 +151,7 @@ class HexagonLightDevice:
             if last is None or (now - last) > 0.5:
                 self._last_notify_log_ts = now
                 _ROOT_LOGGER.debug(
-                    "%s",
-                    f"{self.address}: HEXAGON_NOTIFY handle=0x{sender:04x} data={raw.hex()}",
+                    f"{self.address}: HEXAGON_NOTIFY handle=0x{sender:04x} data={raw.hex()}"
                 )
 
         if self._parse_state(raw):
