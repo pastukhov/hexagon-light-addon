@@ -109,6 +109,7 @@ class HexagonLightDevice:
         self._status_event = asyncio.Event()
         self._last_notify: bytes | None = None
         self._last_on_command_ts: float | None = None
+        self._last_notify_log_ts: float | None = None
 
         self.is_on: bool | None = None
         self.brightness_percent: int | None = None
@@ -138,9 +139,21 @@ class HexagonLightDevice:
         self._write_response = None
         self._status_event.clear()
 
-    def _handle_notify(self, _sender: int, data: bytearray) -> None:
+    def _handle_notify(self, sender: int, data: bytearray) -> None:
         raw = bytes(data)
         self._last_notify = raw
+        now = monotonic()
+        if _LOGGER.isEnabledFor(logging.DEBUG):
+            last = self._last_notify_log_ts
+            if last is None or (now - last) > 0.5:
+                self._last_notify_log_ts = now
+                _LOGGER.debug(
+                    "%s: HEXAGON_NOTIFY handle=0x%04x data=%s",
+                    self.address,
+                    sender,
+                    raw.hex(),
+                )
+
         if self._parse_state(raw):
             self._status_event.set()
             self._call_callbacks()
