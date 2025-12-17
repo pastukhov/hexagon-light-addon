@@ -1,0 +1,15 @@
+{
+  "domain": "hexagon_light",
+  "name": "Hexagon Light (MeRGBW/TG609)",
+  "bluetooth": [
+    {
+      "local_name": "Hexagon Light*"
+    }
+  ],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/your-org/hexagon-light-addon",
+  "iot_class": "local_polling",
+  "version": "0.1.0"
+}
+

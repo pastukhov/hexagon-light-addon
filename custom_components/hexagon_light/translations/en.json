@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Select Hexagon Light device",
+        "data": {
+          "address": "Device"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect"
+    },
+    "abort": {
+      "no_devices_found": "No devices found"
+    }
+  }
+}
+
