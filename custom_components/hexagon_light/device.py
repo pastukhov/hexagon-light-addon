@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import colorsys
 from collections.abc import Callable
 from contextlib import suppress
 import logging
@@ -81,17 +80,6 @@ def _build_command(cmd: int, payload: bytes | None) -> bytes:
 def _u16_be(value: int) -> bytes:
     value = value & 0xFFFF
     return bytes([(value >> 8) & 0xFF, value & 0xFF])
-
-
-def _rgb_to_hue_sat_payload(r: int, g: int, b: int) -> bytes:
-    r = _clamp_int(r, 0, 255)
-    g = _clamp_int(g, 0, 255)
-    b = _clamp_int(b, 0, 255)
-    h, s, _v = colorsys.rgb_to_hsv(r / 255.0, g / 255.0, b / 255.0)
-    hue_deg = int(h * 360.0) % 360
-    sat_1000 = _clamp_int(int(s * 1000.0), 0, 1000)
-    return _u16_be(hue_deg) + _u16_be(sat_1000)
-
 
 class HexagonLightDevice:
     """Async controller for Hexagon Light."""
@@ -205,25 +193,29 @@ class HexagonLightDevice:
             length = raw[3]
             if length != len(raw):
                 return
-            is_on = raw[4] != 0
+            is_on_byte = raw[4]
+            is_on: bool | None = bool(is_on_byte) if is_on_byte in (0, 1) else None
             if len(raw) >= 7:
                 b = int(raw[5]) - 5
                 if 0 <= b <= 100:
                     brightness_percent = b
-            self.is_on = is_on
+            if is_on is not None:
+                self.is_on = is_on
             self.brightness_percent = brightness_percent
             return
 
         if raw[0] != 0x56:
             return
 
-        is_on = raw[4] != 0
+        is_on_byte = raw[4]
+        is_on: bool | None = bool(is_on_byte) if is_on_byte in (0, 1) else None
         if len(raw) >= 8:
             value = (raw[5] << 8) | raw[6]
             b = (value // 10) - 5
             if 0 <= b <= 100:
                 brightness_percent = b
-        self.is_on = is_on
+        if is_on is not None:
+            self.is_on = is_on
         self.brightness_percent = brightness_percent
 
     async def async_update(self) -> None:
@@ -257,7 +249,7 @@ class HexagonLightDevice:
         r_i = _clamp_int(int(r), 0, 255)
         g_i = _clamp_int(int(g), 0, 255)
         b_i = _clamp_int(int(b), 0, 255)
-        await self._write_frame(_build_command(0x03, _rgb_to_hue_sat_payload(r_i, g_i, b_i)))
+        await self._write_frame(_build_command(0x03, bytes([r_i, g_i, b_i])))
         self.rgb = (r_i, g_i, b_i)
         self.effect = None
         self._call_callbacks()
@@ -268,16 +260,23 @@ class HexagonLightDevice:
         if speed is not None:
             speed_b = _clamp_int(int(speed), 0, 255) & 0xFF
             await self._write_frame(_build_command(0x0F, bytes([speed_b])))
-        self.effect = None
+        self.rgb = None
         self._call_callbacks()
 
     async def async_set_scene_by_name(self, name: str, *, speed: int | None = None) -> None:
         key = name.strip().lower().replace(" ", "_")
+        matched_key: str | None = None
         scene = SCENES_TG609.get(key)
-        if scene is None:
+        if scene is not None:
+            matched_key = key
+        else:
             key2 = key.replace("_", "-")
             scene = SCENES_TG609.get(key2)
-        if scene is None:
+            if scene is not None:
+                matched_key = key2
+
+        if scene is None or matched_key is None:
             raise HexagonLightError(f"Unknown scene name: {name!r}")
         await self.async_set_scene(scene, speed=speed)
-        self.effect = key
+        self.effect = matched_key
+        self._call_callbacks()
