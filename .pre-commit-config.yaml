@@ -15,14 +15,15 @@ repos:
         language: system
         pass_filenames: false
 
-      - id: ruff-check
-        name: ruff (errors only)
-        entry: ruff check --select F,E9 custom_components/hexagon_light
-        language: system
-        pass_filenames: false
-
       - id: conventional-commit-msg
         name: conventional commit message
         entry: python scripts/check-commit-msg.py
         language: system
         stages: [commit-msg]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.10
+    hooks:
+      - id: ruff
+        name: ruff (errors only)
+        args: [--select, "F,E9", custom_components/hexagon_light]
