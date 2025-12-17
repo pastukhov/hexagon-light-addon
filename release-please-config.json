@@ -1,0 +1,10 @@
+{
+  "release-type": "simple",
+  "packages": {
+    ".": {
+      "extra-files": [
+        "custom_components/hexagon_light/manifest.json"
+      ]
+    }
+  }
+}
