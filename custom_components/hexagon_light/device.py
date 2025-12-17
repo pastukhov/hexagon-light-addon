@@ -17,6 +17,7 @@ from homeassistant.core import CALLBACK_TYPE
 from .const import DEVICE_TIMEOUT, NOTIFY_UUID, SERVICE_UUID, STATUS_TIMEOUT, WRITE_UUID
 
 _LOGGER = logging.getLogger(__name__)
+_ROOT_LOGGER = logging.getLogger("custom_components.hexagon_light")
 
 
 class HexagonLightError(RuntimeError):
@@ -143,11 +144,13 @@ class HexagonLightDevice:
         raw = bytes(data)
         self._last_notify = raw
         now = monotonic()
-        if _LOGGER.isEnabledFor(logging.DEBUG):
+        # Log via integration root logger so it shows up even if per-module logger
+        # configuration doesn't get applied as expected.
+        if _ROOT_LOGGER.isEnabledFor(logging.DEBUG):
             last = self._last_notify_log_ts
             if last is None or (now - last) > 0.5:
                 self._last_notify_log_ts = now
-                _LOGGER.debug(
+                _ROOT_LOGGER.debug(
                     "%s: HEXAGON_NOTIFY handle=0x%04x data=%s",
                     self.address,
                     sender,
